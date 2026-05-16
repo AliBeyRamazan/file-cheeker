@@ -158,7 +158,7 @@ func runScan(opts options) {
 	section("HASH DEGERLERI")
 	hashes, err := hasher.ComputeHashes(opts.filePath)
 	if err != nil {
-		fmt.Printf("  %s[HATA]%s Hash hesaplanamadi: %v\n", Red, Reset, err)
+		fmt.Printf("  %s[HATA]%s Hash hesaplanamadi: %s\n", Red, Reset, friendlyError(err))
 	} else {
 		fieldColor("MD5", hashes.MD5, Green)
 		fieldColor("SHA1", hashes.SHA1, Green)
@@ -168,7 +168,7 @@ func runScan(opts options) {
 	section("ENTROPI ANALIZI")
 	ent, err := entropy.Calculate(opts.filePath)
 	if err != nil {
-		fmt.Printf("  %s[HATA]%s Entropi hesaplanamadi: %v\n", Red, Reset, err)
+		fmt.Printf("  %s[HATA]%s Entropi hesaplanamadi: %s\n", Red, Reset, friendlyError(err))
 	} else {
 		color := Green
 		if ent > 7.0 {
@@ -189,7 +189,7 @@ func runScan(opts options) {
 
 	data, err := os.ReadFile(opts.filePath)
 	if err != nil {
-		fmt.Printf("  %s[HATA]%s Dosya okunamadi: %v\n", Red, Reset, err)
+		fmt.Printf("  %s[HATA]%s Dosya okunamadi: %s\n", Red, Reset, friendlyError(err))
 		os.Exit(1)
 	}
 
@@ -215,7 +215,7 @@ func runDirectoryScan(opts options, info os.FileInfo) {
 	err := filepath.WalkDir(opts.filePath, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			skipped++
-			fmt.Printf("  %s[ATLANDI]%s %s: %v\n", Yellow, Reset, path, walkErr)
+			fmt.Printf("  %s[ATLANDI]%s %s: %s\n", Yellow, Reset, path, friendlyError(walkErr))
 			return nil
 		}
 		if path != opts.filePath && entry.IsDir() && !opts.recursive {
@@ -227,7 +227,7 @@ func runDirectoryScan(opts options, info os.FileInfo) {
 		info, err := entry.Info()
 		if err != nil {
 			skipped++
-			fmt.Printf("  %s[ATLANDI]%s %s: %v\n", Yellow, Reset, path, err)
+			fmt.Printf("  %s[ATLANDI]%s %s: %s\n", Yellow, Reset, path, friendlyError(err))
 			return nil
 		}
 		if !info.Mode().IsRegular() {
@@ -238,7 +238,7 @@ func runDirectoryScan(opts options, info os.FileInfo) {
 		scanned++
 		if result.err != nil {
 			skipped++
-			fmt.Printf("  %s[HATA]%s %s: %v\n", Red, Reset, path, result.err)
+			fmt.Printf("  %s[ATLANDI]%s %s: %s\n", Yellow, Reset, path, friendlyError(result.err))
 			return nil
 		}
 		if result.score >= 20 || len(result.ruleMatches) > 0 {
@@ -251,7 +251,7 @@ func runDirectoryScan(opts options, info os.FileInfo) {
 		return nil
 	})
 	if err != nil {
-		fmt.Printf("  %s[HATA]%s Klasor taranamadi: %v\n", Red, Reset, err)
+		fmt.Printf("  %s[HATA]%s Klasor taranamadi: %s\n", Red, Reset, friendlyError(err))
 		os.Exit(1)
 	}
 
@@ -324,6 +324,19 @@ func recursiveLabel(recursive bool) string {
 		return "recursive"
 	}
 	return "sadece bu klasor"
+}
+
+func friendlyError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if os.IsPermission(err) {
+		return fmt.Sprintf("%v (okuma izni yok; USB icin mount iznini kontrol et veya gerekirse sudo ile calistir)", err)
+	}
+	if os.IsNotExist(err) {
+		return fmt.Sprintf("%v (dosya yolu bulunamadi)", err)
+	}
+	return err.Error()
 }
 
 func printELF(filePath string) {

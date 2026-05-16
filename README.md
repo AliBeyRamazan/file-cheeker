@@ -144,6 +144,37 @@ ls
 ./fc /tam/dosya/yolu -a
 ```
 
+`Hash hesaplanamadi`, `Entropi hesaplanamadi` veya `okuma izni yok`
+
+USB icindeki bazi dosyalar okunamiyor olabilir. Bu genelde izin, mount ayari veya bozuk/ozel sistem dosyalarindan kaynaklanir. Once USB yolunu kontrol et:
+
+```bash
+lsblk
+ls -la /media/$USER
+ls -la /media/$USER/USB_ADI
+```
+
+Dosyalar okunabiliyor mu kontrol et:
+
+```bash
+cat /media/$USER/USB_ADI/dosya_adi >/dev/null
+```
+
+Izin hatasi aliyorsan araci sudo ile deneyebilirsin:
+
+```bash
+sudo ./fc /media/$USER/USB_ADI -a
+```
+
+USB farkli bir yerde mount edildiyse dogru mount yolunu kullan:
+
+```bash
+./fc /run/media/$USER/USB_ADI -a
+./fc /mnt/usb -a
+```
+
+Klasor taramasinda okunamayan dosyalar otomatik olarak `ATLANDI` diye gosterilir; tarama diger dosyalarla devam eder.
+
 ## Secenekler
 
 - `-a`, `--all`: tam analiz yapar, stringleri ve importlari da gosterir.
