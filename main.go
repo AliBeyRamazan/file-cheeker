@@ -15,453 +15,338 @@ import (
 	"time"
 )
 
-// ANSI color codes
 const (
-	Reset     = "\033[0m"
-	Bold      = "\033[1m"
-	Dim       = "\033[2m"
-	Red       = "\033[31m"
-	Green     = "\033[32m"
-	Yellow    = "\033[33m"
-	Blue      = "\033[34m"
-	Magenta   = "\033[35m"
-	Cyan      = "\033[36m"
-	White     = "\033[37m"
-	BgRed     = "\033[41m"
-	BgGreen   = "\033[42m"
-	BgYellow  = "\033[43m"
-	BgBlue    = "\033[44m"
-	BgMagenta = "\033[45m"
+	Reset   = "\033[0m"
+	Bold    = "\033[1m"
+	Dim     = "\033[2m"
+	Red     = "\033[31m"
+	Green   = "\033[32m"
+	Yellow  = "\033[33m"
+	Blue    = "\033[34m"
+	Magenta = "\033[35m"
+	Cyan    = "\033[36m"
 )
 
-func banner() {
-	fmt.Println(Cyan + Bold + `
-  ╔═══════════════════════════════════════════════════════════════╗
-  ║                                                               ║
-  ║   ██████╗ ██╗███╗   ██╗ █████╗ ██████╗ ██╗   ██╗            ║
-  ║   ██╔══██╗██║████╗  ██║██╔══██╗██╔══██╗╚██╗ ██╔╝            ║
-  ║   ██████╔╝██║██╔██╗ ██║███████║██████╔╝ ╚████╔╝             ║
-  ║   ██╔══██╗██║██║╚██╗██║██╔══██║██╔══██╗  ╚██╔╝              ║
-  ║   ██████╔╝██║██║ ╚████║██║  ██║██║  ██║   ██║               ║
-  ║   ╚═════╝ ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝╚═╝  ╚═╝   ╚═╝               ║
-  ║                                                               ║
-  ║   ████████╗ █████╗ ██╗  ██╗██╗     ██╗██╗     ██╗            ║
-  ║      ██║   ██╔══██╗██║  ██║██║     ██║██║     ██║            ║
-  ║      ██║   ███████║███████║██║     ██║██║     ██║            ║
-  ║      ██║   ██╔══██║██╔══██║██║     ██║██║     ██║            ║
-  ║      ██║   ██║  ██║██║  ██║███████╗██║███████╗██║            ║
-  ║      ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝╚══════╝╚═╝            ║
-  ║                                                               ║
-  ║          🔍 Fayl Təhlilçisi v1.0 — Binary Analysis Tool       ║
-  ║                                                               ║
-  ╚═══════════════════════════════════════════════════════════════╝` + Reset)
-	fmt.Println()
-}
-
-func section(title string) {
-	line := strings.Repeat("─", 60)
-	fmt.Printf("\n%s%s ┌%s┐%s\n", Bold, Blue, line, Reset)
-	fmt.Printf("%s%s │ %-58s │%s\n", Bold, Blue, title, Reset)
-	fmt.Printf("%s%s └%s┘%s\n", Bold, Blue, line, Reset)
-}
-
-func field(label, value string) {
-	fmt.Printf("  %s%-22s%s %s\n", Yellow, label+":", Reset, value)
-}
-
-func fieldColor(label, value, color string) {
-	fmt.Printf("  %s%-22s%s %s%s%s\n", Yellow, label+":", Reset, color, value, Reset)
+type options struct {
+	filePath    string
+	showStrings bool
+	showAll     bool
+	showImports bool
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		banner()
-		fmt.Printf("%sİstifadə:%s %s <fayl_yolu> [seçimlər]\n\n", Bold, Reset, os.Args[0])
-		fmt.Printf("%sSeçimlər:%s\n", Bold, Reset)
-		fmt.Printf("  %s--strings%s      Çıxarılmış string-ləri göstər\n", Cyan, Reset)
-		fmt.Printf("  %s--all%s          Bütün təfsilatları göstər\n", Cyan, Reset)
-		fmt.Printf("  %s--imports%s      Bütün import funksiyalarını göstər\n", Cyan, Reset)
-		fmt.Printf("  %s--json%s         JSON formatında çıxış\n", Cyan, Reset)
-		fmt.Println()
-		fmt.Printf("%sNümunə:%s\n", Bold, Reset)
-		fmt.Printf("  %s malware.exe\n", os.Args[0])
-		fmt.Printf("  %s suspicious.elf --all\n", os.Args[0])
+	program := filepath.Base(os.Args[0])
+	opts, ok := parseArgs(program, os.Args[1:])
+	if !ok {
 		os.Exit(1)
 	}
 
-	filePath := os.Args[1]
-	showStrings := false
-	showAll := false
-	showImports := false
+	runScan(opts)
+}
 
-	for _, arg := range os.Args[2:] {
-		switch arg {
-		case "--strings":
-			showStrings = true
-		case "--all":
-			showAll = true
-			showStrings = true
-			showImports = true
-		case "--imports":
-			showImports = true
+func parseArgs(program string, args []string) (options, bool) {
+	if len(args) == 0 || isHelp(args[0]) {
+		usage(program)
+		if len(args) > 0 {
+			os.Exit(0)
+		}
+		return options{}, false
+	}
+
+	if args[0] == "scan" {
+		args = args[1:]
+		if len(args) == 0 {
+			usage(program)
+			return options{}, false
 		}
 	}
 
-	banner()
+	opts := options{filePath: args[0]}
+	for _, arg := range args[1:] {
+		switch arg {
+		case "-a", "--all":
+			opts.showAll = true
+			opts.showStrings = true
+			opts.showImports = true
+		case "-s", "--strings":
+			opts.showStrings = true
+		case "-i", "--imports":
+			opts.showImports = true
+		case "-h", "--help":
+			usage(program)
+			os.Exit(0)
+		default:
+			fmt.Printf("%sBilinmeyen secenek:%s %s\n\n", Red, Reset, arg)
+			usage(program)
+			return options{}, false
+		}
+	}
 
+	return opts, true
+}
+
+func isHelp(arg string) bool {
+	return arg == "-h" || arg == "--help" || arg == "help"
+}
+
+func usage(program string) {
+	banner()
+	fmt.Printf("%sKullanim:%s\n", Bold, Reset)
+	fmt.Printf("  %s <dosya> [secenek]\n", program)
+	fmt.Printf("  %s scan <dosya> [secenek]\n\n", program)
+
+	fmt.Printf("%sKisa secenekler:%s\n", Bold, Reset)
+	fmt.Printf("  %s-a%s  tam analiz: stringler + importlar\n", Cyan, Reset)
+	fmt.Printf("  %s-s%s  bulunan stringleri goster\n", Cyan, Reset)
+	fmt.Printf("  %s-i%s  PE import fonksiyonlarini goster\n", Cyan, Reset)
+	fmt.Printf("  %s-h%s  yardim\n\n", Cyan, Reset)
+
+	fmt.Printf("%sLinux ornekleri:%s\n", Bold, Reset)
+	fmt.Printf("  %s ./suspicious\n", program)
+	fmt.Printf("  %s ./suspicious -a\n", program)
+	fmt.Printf("  %s /bin/ls -s\n", program)
+	fmt.Printf("  %s scan ./sample.elf -a\n", program)
+}
+
+func runScan(opts options) {
+	banner()
 	startTime := time.Now()
 
-	// Check file exists
-	info, err := os.Stat(filePath)
+	info, err := os.Stat(opts.filePath)
 	if err != nil {
-		fmt.Printf("%s%s[XƏTA]%s Fayl tapılmadı: %s\n", Bold, Red, Reset, filePath)
+		fmt.Printf("%s[HATA]%s Dosya bulunamadi: %s\n", Red, Reset, opts.filePath)
 		os.Exit(1)
 	}
 
-	// ═══════════════════════════════════════════
-	// BASIC FILE INFO
-	// ═══════════════════════════════════════════
-	section("📋 ƏSAS FAYL MƏLUMATLARI")
-
-	absPath, _ := filepath.Abs(filePath)
-	field("Fayl adı", filepath.Base(filePath))
+	absPath, _ := filepath.Abs(opts.filePath)
+	section("DOSYA BILGILERI")
+	field("Dosya adi", filepath.Base(opts.filePath))
 	field("Tam yol", absPath)
-	field("Ölçü", fmt.Sprintf("%s (%d bayt)", analyzer.FormatSize(info.Size()), info.Size()))
-	field("Dəyişmə tarixi", info.ModTime().Format("2006-01-02 15:04:05"))
+	field("Boyut", fmt.Sprintf("%s (%d bayt)", analyzer.FormatSize(info.Size()), info.Size()))
+	field("Degisme tarihi", info.ModTime().Format("2006-01-02 15:04:05"))
 
-	// ═══════════════════════════════════════════
-	// FILE TYPE DETECTION
-	// ═══════════════════════════════════════════
-	section("🔎 FAYL NÖVÜNÜN TƏYİNİ")
-
-	fileType, fileTypeStr, err := analyzer.DetectFileType(filePath)
+	section("DOSYA TURU")
+	fileType, fileTypeStr, err := analyzer.DetectFileType(opts.filePath)
 	if err != nil {
-		field("Fayl növü", "Təyin edilə bilmədi")
+		field("Dosya turu", "Belirlenemedi")
 	} else {
-		field("Fayl növü", fileTypeStr)
+		field("Dosya turu", fileTypeStr)
 	}
 
-	// ═══════════════════════════════════════════
-	// HASHES
-	// ═══════════════════════════════════════════
-	section("🔐 HƏŞ DƏYƏRLƏRİ")
-
-	hashes, err := hasher.ComputeHashes(filePath)
+	section("HASH DEGERLERI")
+	hashes, err := hasher.ComputeHashes(opts.filePath)
 	if err != nil {
-		fmt.Printf("  %s[XƏTA]%s Həşlər hesablana bilmədi: %v\n", Red, Reset, err)
+		fmt.Printf("  %s[HATA]%s Hash hesaplanamadi: %v\n", Red, Reset, err)
 	} else {
 		fieldColor("MD5", hashes.MD5, Green)
 		fieldColor("SHA1", hashes.SHA1, Green)
 		fieldColor("SHA256", hashes.SHA256, Green)
 	}
 
-	// ═══════════════════════════════════════════
-	// ENTROPY
-	// ═══════════════════════════════════════════
-	section("📊 ENTROPİYA TƏHLİLİ")
-
-	ent, err := entropy.Calculate(filePath)
+	section("ENTROPI ANALIZI")
+	ent, err := entropy.Calculate(opts.filePath)
 	if err != nil {
-		fmt.Printf("  %s[XƏTA]%s Entropiya hesablana bilmədi: %v\n", Red, Reset, err)
+		fmt.Printf("  %s[HATA]%s Entropi hesaplanamadi: %v\n", Red, Reset, err)
 	} else {
-		entColor := Green
+		color := Green
 		if ent > 7.0 {
-			entColor = Red
+			color = Red
 		} else if ent > 5.0 {
-			entColor = Yellow
+			color = Yellow
 		}
-		fieldColor("Entropiya", fmt.Sprintf("%.4f / 8.0", ent), entColor)
-		field("Qiymətləndirmə", entropy.Verdict(ent))
-
-		// Visual entropy bar
-		barLen := 40
-		filled := int(ent / 8.0 * float64(barLen))
-		bar := strings.Repeat("█", filled) + strings.Repeat("░", barLen-filled)
-		fmt.Printf("  %s%-22s%s %s%s%s\n", Yellow, "Vizual:", Reset, entColor, bar, Reset)
+		fieldColor("Entropi", fmt.Sprintf("%.4f / 8.0", ent), color)
+		field("Yorum", entropy.Verdict(ent))
 	}
 
-	// ═══════════════════════════════════════════
-	// PE ANALYSIS
-	// ═══════════════════════════════════════════
-	if fileType == analyzer.PE {
-		section("🪟 PE (Windows) TƏHLİLİ")
-
-		peInfo, err := peparser.Parse(filePath)
-		if err != nil {
-			fmt.Printf("  %s[XƏTA]%s PE təhlil edilə bilmədi: %v\n", Red, Reset, err)
-		} else {
-			field("Maşın", peInfo.Machine)
-			field("Tarix", peInfo.TimeDateStamp.Format("2006-01-02 15:04:05 UTC"))
-			field("Giriş nöqtəsi", fmt.Sprintf("0x%X", peInfo.EntryPoint))
-			field("Image Base", fmt.Sprintf("0x%X", peInfo.ImageBase))
-			field("Alt sistem", peInfo.Subsystem)
-			field("Bölmə sayı", fmt.Sprintf("%d", peInfo.NumberOfSections))
-			field("Xüsusiyyətlər", strings.Join(peInfo.Characteristics, ", "))
-			field("DLL Xüsusiyyətləri", strings.Join(peInfo.DLLCharacteristics, ", "))
-
-			// Sections
-			if len(peInfo.Sections) > 0 {
-				fmt.Printf("\n  %s%sBölmələr:%s\n", Bold, Cyan, Reset)
-				fmt.Printf("  %s┌──────────┬──────────┬──────────┬─────────┬──────────────────────┐%s\n", Dim, Reset)
-				fmt.Printf("  %s│ %-8s │ %-8s │ %-8s │ %-7s │ %-20s │%s\n", Dim, "Ad", "VirtÖlçü", "RawÖlçü", "Entrop.", "Xüsusiyyətlər", Reset)
-				fmt.Printf("  %s├──────────┼──────────┼──────────┼─────────┼──────────────────────┤%s\n", Dim, Reset)
-				for _, sec := range peInfo.Sections {
-					entColor := Green
-					if sec.Entropy > 7.0 {
-						entColor = Red + Bold
-					} else if sec.Entropy > 6.0 {
-						entColor = Yellow
-					}
-					chars := strings.Join(sec.Characteristics, ",")
-					if len(chars) > 20 {
-						chars = chars[:20]
-					}
-					fmt.Printf("  %s│%s %-8s %s│%s %8X %s│%s %8X %s│%s %s%.4f%s %s│%s %-20s %s│%s\n",
-						Dim, Reset, sec.Name,
-						Dim, Reset, sec.VirtualSize,
-						Dim, Reset, sec.RawSize,
-						Dim, Reset, entColor, sec.Entropy, Reset,
-						Dim, Reset, chars, Dim, Reset)
-				}
-				fmt.Printf("  %s└──────────┴──────────┴──────────┴─────────┴──────────────────────┘%s\n", Dim, Reset)
-			}
-
-			// Imports
-			if len(peInfo.Imports) > 0 {
-				fmt.Printf("\n  %s%sİmport edilən DLL-lər (%d):%s\n", Bold, Cyan, len(peInfo.Imports), Reset)
-				for _, imp := range peInfo.Imports {
-					fmt.Printf("    %s📦 %s%s %s(%d funksiya)%s\n", Yellow, imp.DLLName, Reset, Dim, len(imp.Functions), Reset)
-					if showImports || showAll {
-						for _, fn := range imp.Functions {
-							fmt.Printf("      %s→ %s%s\n", Dim, fn, Reset)
-						}
-					}
-				}
-			}
-
-			// Exports
-			if len(peInfo.Exports) > 0 {
-				fmt.Printf("\n  %s%sExport edilən funksiyalar (%d):%s\n", Bold, Cyan, len(peInfo.Exports), Reset)
-				for _, exp := range peInfo.Exports {
-					fmt.Printf("    %s📤 %s%s\n", Green, exp, Reset)
-				}
-			}
-
-			// Packing detection
-			if peInfo.IsPacked {
-				fmt.Printf("\n  %s%s🚨 PAKETLƏNMİŞ FAYL AŞKARLANDI!%s\n", Bold, Red, Reset)
-				for _, hint := range peInfo.PackerHints {
-					fmt.Printf("    %s⚠ %s%s\n", Red, hint, Reset)
-				}
-			}
-		}
-	}
-
-	// ═══════════════════════════════════════════
-	// ELF ANALYSIS
-	// ═══════════════════════════════════════════
 	if fileType == analyzer.ELF {
-		section("🐧 ELF (Linux/Unix) TƏHLİLİ")
-
-		elfInfo, err := elfparser.Parse(filePath)
-		if err != nil {
-			fmt.Printf("  %s[XƏTA]%s ELF təhlil edilə bilmədi: %v\n", Red, Reset, err)
-		} else {
-			field("Sinif", elfInfo.Class)
-			field("Bayt sırası", elfInfo.Endianness)
-			field("OS/ABI", elfInfo.OSABI)
-			field("Növ", elfInfo.Type)
-			field("Maşın", elfInfo.Machine)
-			field("Giriş nöqtəsi", fmt.Sprintf("0x%X", elfInfo.EntryPoint))
-			if elfInfo.Interpreter != "" {
-				field("Interpreter", elfInfo.Interpreter)
-			}
-
-			// Sections
-			if len(elfInfo.Sections) > 0 {
-				fmt.Printf("\n  %s%sBölmələr:%s\n", Bold, Cyan, Reset)
-				fmt.Printf("  %s┌──────────────────┬──────────┬──────────┬─────────┬────────────────┐%s\n", Dim, Reset)
-				fmt.Printf("  %s│ %-16s │ %-8s │ %-8s │ %-7s │ %-14s │%s\n", Dim, "Ad", "Növ", "Ölçü", "Entrop.", "Bayraqlar", Reset)
-				fmt.Printf("  %s├──────────────────┼──────────┼──────────┼─────────┼────────────────┤%s\n", Dim, Reset)
-				for _, sec := range elfInfo.Sections {
-					if sec.Name == "" {
-						continue
-					}
-					entColor := Green
-					if sec.Entropy > 7.0 {
-						entColor = Red + Bold
-					} else if sec.Entropy > 6.0 {
-						entColor = Yellow
-					}
-					name := sec.Name
-					if len(name) > 16 {
-						name = name[:16]
-					}
-					flags := strings.Join(sec.Flags, ",")
-					if len(flags) > 14 {
-						flags = flags[:14]
-					}
-					fmt.Printf("  %s│%s %-16s %s│%s %-8s %s│%s %8d %s│%s %s%.4f%s %s│%s %-14s %s│%s\n",
-						Dim, Reset, name,
-						Dim, Reset, sec.Type,
-						Dim, Reset, sec.Size,
-						Dim, Reset, entColor, sec.Entropy, Reset,
-						Dim, Reset, flags, Dim, Reset)
-				}
-				fmt.Printf("  %s└──────────────────┴──────────┴──────────┴─────────┴────────────────┘%s\n", Dim, Reset)
-			}
-
-			// Dynamic Libraries
-			if len(elfInfo.DynLibs) > 0 {
-				fmt.Printf("\n  %s%sDinamik kitabxanalar (%d):%s\n", Bold, Cyan, len(elfInfo.DynLibs), Reset)
-				for _, lib := range elfInfo.DynLibs {
-					fmt.Printf("    %s📦 %s%s\n", Yellow, lib, Reset)
-				}
-			}
-
-			// Packing
-			if elfInfo.IsPacked {
-				fmt.Printf("\n  %s%s🚨 PAKETLƏNMİŞ FAYL AŞKARLANDI!%s\n", Bold, Red, Reset)
-				for _, hint := range elfInfo.PackerHints {
-					fmt.Printf("    %s⚠ %s%s\n", Red, hint, Reset)
-				}
-			}
-		}
+		printELF(opts.filePath)
+	}
+	if fileType == analyzer.PE {
+		printPE(opts.filePath, opts)
 	}
 
-	// ═══════════════════════════════════════════
-	// YARA-LIKE RULE SCANNING
-	// ═══════════════════════════════════════════
-	section("🛡️ İMZA ƏSASLI SKAN")
-
-	data, err := os.ReadFile(filePath)
+	data, err := os.ReadFile(opts.filePath)
 	if err != nil {
-		fmt.Printf("  %s[XƏTA]%s Fayl oxuna bilmədi: %v\n", Red, Reset, err)
-	} else {
-		rules := yara_rules.DefaultRules()
-		matches := yara_rules.Scan(data, rules)
-
-		if len(matches) == 0 {
-			fmt.Printf("  %s✅ Heç bir şübhəli imza tapılmadı.%s\n", Green, Reset)
-		} else {
-			fmt.Printf("  %s%s⚠ %d qayda uyğunluğu tapıldı!%s\n\n", Bold, Red, len(matches), Reset)
-			for _, m := range matches {
-				icon := yara_rules.SeverityIcon(m.Severity)
-				sevColor := Green
-				switch m.Severity {
-				case "medium":
-					sevColor = Yellow
-				case "high":
-					sevColor = Magenta
-				case "critical":
-					sevColor = Red + Bold
-				}
-				fmt.Printf("  %s %s%s[%s]%s %s\n", icon, sevColor, Bold, strings.ToUpper(m.Severity), Reset, m.RuleName)
-				fmt.Printf("    %s%s%s\n", Dim, m.Description, Reset)
-				for _, d := range m.Details {
-					fmt.Printf("    %s→ %s%s\n", sevColor, d, Reset)
-				}
-				fmt.Println()
-			}
-		}
+		fmt.Printf("  %s[HATA]%s Dosya okunamadi: %v\n", Red, Reset, err)
+		os.Exit(1)
 	}
 
-	// ═══════════════════════════════════════════
-	// SUSPICIOUS STRINGS
-	// ═══════════════════════════════════════════
-	section("🔤 ŞÜBHƏLİ STRİNG-LƏR")
+	matches := printRules(data)
+	suspiciousCount := printStrings(opts.filePath, opts)
+	printScore(ent, matches, suspiciousCount)
 
-	strs, err := strings_extract.Extract(filePath, 6)
-	if err != nil {
-		fmt.Printf("  %s[XƏTA]%s String-lər çıxarıla bilmədi: %v\n", Red, Reset, err)
-	} else {
-		field("Cəmi string", fmt.Sprintf("%d (min 6 simvol)", len(strs)))
-
-		suspicious := strings_extract.FindSuspicious(strs)
-		if len(suspicious) == 0 {
-			fmt.Printf("  %s✅ Şübhəli string tapılmadı.%s\n", Green, Reset)
-		} else {
-			totalSuspicious := 0
-			for _, v := range suspicious {
-				totalSuspicious += len(v)
-			}
-			fmt.Printf("  %s%s⚠ %d şübhəli string tapıldı:%s\n\n", Bold, Yellow, totalSuspicious, Reset)
-
-			for category, values := range suspicious {
-				fmt.Printf("  %s%s📌 %s:%s\n", Bold, Cyan, category, Reset)
-				maxShow := 10
-				if showAll {
-					maxShow = len(values)
-				}
-				for i, v := range values {
-					if i >= maxShow {
-						fmt.Printf("    %s... və %d daha%s\n", Dim, len(values)-maxShow, Reset)
-						break
-					}
-					fmt.Printf("    %s→ %s%s\n", Yellow, v, Reset)
-				}
-			}
-		}
-
-		// Show all strings if requested
-		if showStrings {
-			fmt.Printf("\n  %s%sBütün string-lər (ilk 100):%s\n", Bold, Cyan, Reset)
-			maxShow := 100
-			if len(strs) < maxShow {
-				maxShow = len(strs)
-			}
-			for i := 0; i < maxShow; i++ {
-				s := strs[i]
-				if len(s) > 80 {
-					s = s[:80] + "..."
-				}
-				fmt.Printf("    %s[%04d]%s %s\n", Dim, i, Reset, s)
-			}
-			if len(strs) > 100 {
-				fmt.Printf("    %s... və %d daha (--all ilə göstərin)%s\n", Dim, len(strs)-100, Reset)
-			}
-		}
-	}
-
-	// ═══════════════════════════════════════════
-	// THREAT SCORE
-	// ═══════════════════════════════════════════
-	section("🎯 TƏHDİD QİYMƏTLƏNDİRMƏSİ")
-
-	score := calculateThreatScore(filePath, fileType, ent, data)
-	scoreColor := Green
-	scoreLabel := "TƏHLÜKƏ AŞKARLANMADI"
-	if score > 80 {
-		scoreColor = Red + Bold
-		scoreLabel = "ÇOX YÜKSƏK RİSK"
-	} else if score > 60 {
-		scoreColor = Red
-		scoreLabel = "YÜKSƏK RİSK"
-	} else if score > 40 {
-		scoreColor = Yellow
-		scoreLabel = "ORTA RİSK"
-	} else if score > 20 {
-		scoreColor = Yellow
-		scoreLabel = "AŞAĞI RİSK"
-	}
-
-	barLen := 50
-	filled := score * barLen / 100
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", barLen-filled)
-	fmt.Printf("  %sBAL: %s%d/100 — %s%s\n", Bold, scoreColor, score, scoreLabel, Reset)
-	fmt.Printf("  %s%s%s\n", scoreColor, bar, Reset)
-
-	// ═══════════════════════════════════════════
-	// SUMMARY
-	// ═══════════════════════════════════════════
-	elapsed := time.Since(startTime)
-	fmt.Printf("\n%s%s ⏱ Təhlil tamamlandı: %v%s\n\n", Dim, Blue, elapsed, Reset)
+	fmt.Printf("\n%sAnaliz tamamlandi: %v%s\n\n", Dim, time.Since(startTime), Reset)
 }
 
-func calculateThreatScore(filePath string, fileType analyzer.FileType, ent float64, data []byte) int {
-	score := 0
+func printELF(filePath string) {
+	section("ELF ANALIZI")
+	info, err := elfparser.Parse(filePath)
+	if err != nil {
+		fmt.Printf("  %s[HATA]%s ELF analiz edilemedi: %v\n", Red, Reset, err)
+		return
+	}
 
-	// Entropy score
+	field("Sinif", info.Class)
+	field("Byte sirasi", info.Endianness)
+	field("OS/ABI", info.OSABI)
+	field("Tur", info.Type)
+	field("Makine", info.Machine)
+	field("Entry point", fmt.Sprintf("0x%X", info.EntryPoint))
+	if info.Interpreter != "" {
+		field("Interpreter", info.Interpreter)
+	}
+	if len(info.DynLibs) > 0 {
+		field("Dinamik kutuphane", strings.Join(info.DynLibs, ", "))
+	}
+	printPacker(info.IsPacked, info.PackerHints)
+}
+
+func printPE(filePath string, opts options) {
+	section("PE ANALIZI")
+	info, err := peparser.Parse(filePath)
+	if err != nil {
+		fmt.Printf("  %s[HATA]%s PE analiz edilemedi: %v\n", Red, Reset, err)
+		return
+	}
+
+	field("Makine", info.Machine)
+	field("Tarih", info.TimeDateStamp.Format("2006-01-02 15:04:05 UTC"))
+	field("Entry point", fmt.Sprintf("0x%X", info.EntryPoint))
+	field("Image base", fmt.Sprintf("0x%X", info.ImageBase))
+	field("Alt sistem", info.Subsystem)
+	field("Bolum sayisi", fmt.Sprintf("%d", info.NumberOfSections))
+
+	if len(info.Imports) > 0 {
+		fmt.Printf("\n  %sImport edilen DLL'ler (%d):%s\n", Bold+Cyan, len(info.Imports), Reset)
+		for _, imp := range info.Imports {
+			fmt.Printf("    %s (%d fonksiyon)\n", imp.DLLName, len(imp.Functions))
+			if opts.showImports || opts.showAll {
+				for _, fn := range imp.Functions {
+					fmt.Printf("      - %s\n", fn)
+				}
+			}
+		}
+	}
+
+	if len(info.Exports) > 0 {
+		fmt.Printf("\n  %sExport edilen fonksiyonlar (%d):%s\n", Bold+Cyan, len(info.Exports), Reset)
+		for _, exp := range info.Exports {
+			fmt.Printf("    - %s\n", exp)
+		}
+	}
+
+	printPacker(info.IsPacked, info.PackerHints)
+}
+
+func printPacker(isPacked bool, hints []string) {
+	if !isPacked {
+		return
+	}
+	fmt.Printf("\n  %sPAKETLENMIS DOSYA BULUNDU%s\n", Red+Bold, Reset)
+	for _, hint := range hints {
+		fmt.Printf("    - %s\n", hint)
+	}
+}
+
+func printRules(data []byte) []yara_rules.Match {
+	section("IMZA TARAMASI")
+	matches := yara_rules.Scan(data, yara_rules.DefaultRules())
+	if len(matches) == 0 {
+		fmt.Printf("  %sSupheli imza bulunmadi.%s\n", Green, Reset)
+		return matches
+	}
+
+	fmt.Printf("  %s%d kural eslesmesi bulundu.%s\n\n", Red+Bold, len(matches), Reset)
+	for _, match := range matches {
+		color := severityColor(match.Severity)
+		fmt.Printf("  %s[%s]%s %s\n", color+Bold, strings.ToUpper(match.Severity), Reset, match.RuleName)
+		fmt.Printf("    %s%s%s\n", Dim, match.Description, Reset)
+		for _, detail := range match.Details {
+			fmt.Printf("    - %s\n", detail)
+		}
+	}
+	return matches
+}
+
+func printStrings(filePath string, opts options) int {
+	section("SUPHELI STRINGLER")
+	strs, err := strings_extract.Extract(filePath, 6)
+	if err != nil {
+		fmt.Printf("  %s[HATA]%s Stringler cikarilamadi: %v\n", Red, Reset, err)
+		return 0
+	}
+
+	field("Toplam string", fmt.Sprintf("%d (min 6 karakter)", len(strs)))
+	suspicious := strings_extract.FindSuspicious(strs)
+	total := 0
+	for _, values := range suspicious {
+		total += len(values)
+	}
+
+	if total == 0 {
+		fmt.Printf("  %sSupheli string bulunmadi.%s\n", Green, Reset)
+	} else {
+		fmt.Printf("  %s%d supheli string bulundu:%s\n\n", Yellow+Bold, total, Reset)
+		for category, values := range suspicious {
+			fmt.Printf("  %s%s:%s\n", Cyan+Bold, category, Reset)
+			limit := 10
+			if opts.showAll || len(values) < limit {
+				limit = len(values)
+			}
+			for i := 0; i < limit; i++ {
+				fmt.Printf("    - %s\n", values[i])
+			}
+			if len(values) > limit {
+				fmt.Printf("    %s... ve %d tane daha%s\n", Dim, len(values)-limit, Reset)
+			}
+		}
+	}
+
+	if opts.showStrings {
+		fmt.Printf("\n  %sTum stringler (ilk 100):%s\n", Cyan+Bold, Reset)
+		limit := 100
+		if len(strs) < limit {
+			limit = len(strs)
+		}
+		for i := 0; i < limit; i++ {
+			value := strs[i]
+			if len(value) > 100 {
+				value = value[:100] + "..."
+			}
+			fmt.Printf("    [%04d] %s\n", i, value)
+		}
+		if len(strs) > limit {
+			fmt.Printf("    %s... ve %d tane daha (-a ile gosterin)%s\n", Dim, len(strs)-limit, Reset)
+		}
+	}
+
+	return len(suspicious)
+}
+
+func printScore(ent float64, matches []yara_rules.Match, suspiciousCategories int) {
+	section("RISK PUANI")
+	score := calculateThreatScore(ent, matches, suspiciousCategories)
+	color := Green
+	label := "RISK BULUNMADI"
+	if score > 80 {
+		color = Red + Bold
+		label = "COK YUKSEK RISK"
+	} else if score > 60 {
+		color = Red
+		label = "YUKSEK RISK"
+	} else if score > 40 {
+		color = Yellow
+		label = "ORTA RISK"
+	} else if score > 20 {
+		color = Yellow
+		label = "DUSUK RISK"
+	}
+
+	fmt.Printf("  %sPuan:%s %s%d/100 - %s%s\n", Bold, Reset, color, score, label, Reset)
+}
+
+func calculateThreatScore(ent float64, matches []yara_rules.Match, suspiciousCategories int) int {
+	score := 0
 	if ent > 7.5 {
 		score += 30
 	} else if ent > 7.0 {
@@ -470,11 +355,8 @@ func calculateThreatScore(filePath string, fileType analyzer.FileType, ent float
 		score += 10
 	}
 
-	// YARA matches
-	rules := yara_rules.DefaultRules()
-	matches := yara_rules.Scan(data, rules)
-	for _, m := range matches {
-		switch m.Severity {
+	for _, match := range matches {
+		switch match.Severity {
 		case "critical":
 			score += 25
 		case "high":
@@ -486,17 +368,41 @@ func calculateThreatScore(filePath string, fileType analyzer.FileType, ent float
 		}
 	}
 
-	// Suspicious strings
-	strs := strings_extract.ExtractFromBytes(data, 6)
-	suspicious := strings_extract.FindSuspicious(strs)
-	for range suspicious {
-		score += 5
-	}
-
-	// Cap at 100
+	score += suspiciousCategories * 5
 	if score > 100 {
-		score = 100
+		return 100
 	}
-
 	return score
+}
+
+func banner() {
+	fmt.Println(Cyan + Bold + "file-cheeker" + Reset)
+	fmt.Println(Dim + "Linux binary and file triage tool" + Reset)
+	fmt.Println()
+}
+
+func section(title string) {
+	fmt.Printf("\n%s%s[%s]%s\n", Bold, Blue, title, Reset)
+	fmt.Printf("%s%s%s%s\n", Dim, Blue, strings.Repeat("-", 60), Reset)
+}
+
+func field(label, value string) {
+	fmt.Printf("  %s%-22s%s %s\n", Yellow, label+":", Reset, value)
+}
+
+func fieldColor(label, value, color string) {
+	fmt.Printf("  %s%-22s%s %s%s%s\n", Yellow, label+":", Reset, color, value, Reset)
+}
+
+func severityColor(severity string) string {
+	switch severity {
+	case "medium":
+		return Yellow
+	case "high":
+		return Magenta
+	case "critical":
+		return Red
+	default:
+		return Green
+	}
 }

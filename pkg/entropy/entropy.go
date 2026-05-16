@@ -7,19 +7,18 @@ import (
 	"os"
 )
 
-// Calculate computes Shannon entropy of a file (0.0 - 8.0)
-// High entropy (>7.0) suggests encryption/compression/packing
+// Calculate computes Shannon entropy of a file (0.0 - 8.0).
 func Calculate(filepath string) (float64, error) {
 	f, err := os.Open(filepath)
 	if err != nil {
-		return 0, fmt.Errorf("fayl açıla bilmədi: %w", err)
+		return 0, fmt.Errorf("dosya acilamadi: %w", err)
 	}
 	defer f.Close()
 
 	return CalculateFromReader(f)
 }
 
-// CalculateFromReader computes Shannon entropy from any reader
+// CalculateFromReader computes Shannon entropy from any reader.
 func CalculateFromReader(r io.Reader) (float64, error) {
 	var freq [256]float64
 	var total float64
@@ -35,7 +34,7 @@ func CalculateFromReader(r io.Reader) (float64, error) {
 			break
 		}
 		if err != nil {
-			return 0, fmt.Errorf("oxunarkən xəta: %w", err)
+			return 0, fmt.Errorf("okuma hatasi: %w", err)
 		}
 	}
 
@@ -54,7 +53,7 @@ func CalculateFromReader(r io.Reader) (float64, error) {
 	return entropy, nil
 }
 
-// CalculateFromBytes computes entropy for a byte slice
+// CalculateFromBytes computes entropy for a byte slice.
 func CalculateFromBytes(data []byte) float64 {
 	if len(data) == 0 {
 		return 0
@@ -76,20 +75,20 @@ func CalculateFromBytes(data []byte) float64 {
 	return entropy
 }
 
-// Verdict returns a human-readable assessment of entropy level
+// Verdict returns a human-readable assessment of entropy level.
 func Verdict(entropy float64) string {
 	switch {
 	case entropy < 1.0:
-		return "Çox aşağı (boş/təkrarlanan məlumat)"
+		return "Cok dusuk (bos veya tekrarli veri)"
 	case entropy < 3.0:
-		return "Aşağı (strukturlaşdırılmış məlumat)"
+		return "Dusuk (yapilandirilmis veri)"
 	case entropy < 5.0:
-		return "Orta (normal icra edilə bilən)"
+		return "Orta (normal calisabilir dosya seviyesi)"
 	case entropy < 7.0:
-		return "Yüksək (sıxılmış bölmələr ola bilər)"
+		return "Yuksek (sikistirilmis bolumler olabilir)"
 	case entropy < 7.5:
-		return "⚠ Çox yüksək (sıxılmış/paketlənmiş)"
+		return "Cok yuksek (sikistirilmis veya paketlenmis olabilir)"
 	default:
-		return "🚨 Həddindən artıq yüksək (şifrələnmiş/paketlənmiş - ŞÜBHƏLİ)"
+		return "Asiri yuksek (sifrelenmis veya paketlenmis olabilir)"
 	}
 }
