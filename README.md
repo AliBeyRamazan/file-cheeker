@@ -78,6 +78,18 @@ ls /media/$USER
 ./fc /media/$USER/USB_ADI -a
 ```
 
+Viruslu bulunan dosyalari karantinaya almak icin `-q` kullan:
+
+```bash
+./fc /media/$USER/USB_ADI -a -q
+```
+
+Karantina dosyalari varsayilan olarak `.fc-quarantine` klasorune tasinir. Farkli bir klasor kullanmak icin:
+
+```bash
+./fc /media/$USER/USB_ADI -a -q --quarantine-dir ~/fc-quarantine
+```
+
 Sadece verdigin klasorun icini tara, alt klasorlere girme:
 
 ```bash
@@ -180,8 +192,31 @@ Klasor taramasinda okunamayan dosyalar otomatik olarak `ATLANDI` diye gosterilir
 - `-a`, `--all`: tam analiz yapar, stringleri ve importlari da gosterir.
 - `-s`, `--strings`: cikarilan stringleri gosterir.
 - `-i`, `--imports`: PE import fonksiyonlarini gosterir.
+- `-q`, `--quarantine`: viruslu/cok riskli bulunan dosyalari karantinaya tasir.
+- `--quarantine-dir <klasor>`: karantina klasorunu belirler. Varsayilan: `.fc-quarantine`.
 - `--no-recursive`: klasor taramasinda alt klasorlere girmez.
 - `-h`, `--help`: yardim ekranini gosterir.
+
+## Virus analizi ve karantina
+
+Araç statik analiz yapar; antivirus motoru degildir. Dosya su durumlardan birindeyse viruslu/cok riskli kabul edilir:
+
+- Risk puani `60/100` veya daha yuksekse.
+- Kritik seviyede imza eslesmesi varsa.
+
+Karantina aktif degilse arac sadece rapor verir:
+
+```bash
+./fc ~/Downloads -a
+```
+
+Karantina aktifse viruslu/cok riskli dosyalar `.fc-quarantine` klasorune tasinir:
+
+```bash
+./fc ~/Downloads -a -q
+```
+
+Her karantina dosyasinin yanina `.meta.txt` dosyasi yazilir. Bu dosyada orijinal yol, SHA256, risk puani, entropi ve eslesen kurallar bulunur.
 
 ## Gelistirme modunda calistirma
 

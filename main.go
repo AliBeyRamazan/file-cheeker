@@ -9,6 +9,7 @@ import (
 	"file-analyzer/pkg/strings_extract"
 	"file-analyzer/pkg/yara_rules"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -29,11 +30,13 @@ const (
 )
 
 type options struct {
-	filePath    string
-	showStrings bool
-	showAll     bool
-	showImports bool
-	recursive   bool
+	filePath      string
+	showStrings   bool
+	showAll       bool
+	showImports   bool
+	recursive     bool
+	quarantine    bool
+	quarantineDir string
 }
 
 type fileSummary struct {
@@ -74,8 +77,9 @@ func parseArgs(program string, args []string) (options, bool) {
 		}
 	}
 
-	opts := options{filePath: args[0], recursive: true}
-	for _, arg := range args[1:] {
+	opts := options{filePath: args[0], recursive: true, quarantineDir: ".fc-quarantine"}
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
 		switch arg {
 		case "-a", "--all":
 			opts.showAll = true
@@ -87,6 +91,16 @@ func parseArgs(program string, args []string) (options, bool) {
 			opts.showImports = true
 		case "--no-recursive":
 			opts.recursive = false
+		case "-q", "--quarantine":
+			opts.quarantine = true
+		case "--quarantine-dir":
+			if i+1 >= len(args) {
+				fmt.Printf("%sEksik deger:%s --quarantine-dir <klasor>\n\n", Red, Reset)
+				usage(program)
+				return options{}, false
+			}
+			i++
+			opts.quarantineDir = args[i]
 		case "-h", "--help":
 			usage(program)
 			os.Exit(0)
@@ -114,7 +128,9 @@ func usage(program string) {
 	fmt.Printf("  %s-a%s  tam analiz: stringler + importlar\n", Cyan, Reset)
 	fmt.Printf("  %s-s%s  bulunan stringleri goster\n", Cyan, Reset)
 	fmt.Printf("  %s-i%s  PE import fonksiyonlarini goster\n", Cyan, Reset)
+	fmt.Printf("  %s-q%s  viruslu bulunan dosyalari karantinaya al\n", Cyan, Reset)
 	fmt.Printf("  %s--no-recursive%s  klasor tararken alt klasorlere girme\n", Cyan, Reset)
+	fmt.Printf("  %s--quarantine-dir%s <klasor>  karantina klasoru\n", Cyan, Reset)
 	fmt.Printf("  %s-h%s  yardim\n\n", Cyan, Reset)
 
 	fmt.Printf("%sLinux ornekleri:%s\n", Bold, Reset)
@@ -123,6 +139,7 @@ func usage(program string) {
 	fmt.Printf("  %s /bin/ls -s\n", program)
 	fmt.Printf("  %s ~/Downloads -a\n", program)
 	fmt.Printf("  %s /media/$USER/USB_ADI -a\n", program)
+	fmt.Printf("  %s /media/$USER/USB_ADI -a -q\n", program)
 	fmt.Printf("  %s scan ./sample.elf -a\n", program)
 }
 
@@ -187,7 +204,24 @@ func runScan(opts options) {
 
 	matches := printRules(data)
 	suspiciousCount := printStrings(data, opts)
-	printScore(ent, matches, suspiciousCount)
+	score := printScore(ent, matches, suspiciousCount)
+	result := fileSummary{
+		path:                 opts.filePath,
+		fileType:             fileTypeStr,
+		sha256:               hashes.SHA256,
+		entropy:              ent,
+		ruleMatches:          matches,
+		suspiciousCategories: suspiciousCount,
+		score:                score,
+	}
+	printVirusAnalysis(result)
+	if opts.quarantine && isVirus(result) {
+		if quarantinedPath, err := quarantineFile(result, opts); err != nil {
+			fmt.Printf("  %s[HATA]%s Karantina basarisiz: %s\n", Red, Reset, friendlyError(err))
+		} else {
+			fmt.Printf("  %sKarantinaya alindi:%s %s\n", Yellow, Reset, quarantinedPath)
+		}
+	}
 
 	fmt.Printf("\n%sAnaliz tamamlandi: %v%s\n\n", Dim, time.Since(startTime), Reset)
 }
@@ -198,9 +232,12 @@ func runDirectoryScan(opts options, info os.FileInfo) {
 	field("Hedef", absPath)
 	field("Mod", recursiveLabel(opts.recursive))
 	field("Boyut", analyzer.FormatSize(info.Size()))
+	if opts.quarantine {
+		field("Karantina", opts.quarantineDir)
+	}
 
 	startTime := time.Now()
-	var scanned, skipped, risky int
+	var scanned, skipped, risky, quarantined int
 	var highest fileSummary
 	highest.score = -1
 
@@ -211,6 +248,9 @@ func runDirectoryScan(opts options, info os.FileInfo) {
 			return nil
 		}
 		if path != opts.filePath && entry.IsDir() && !opts.recursive {
+			return filepath.SkipDir
+		}
+		if entry.IsDir() && isInsideQuarantine(path, opts.quarantineDir) {
 			return filepath.SkipDir
 		}
 		if entry.IsDir() {
@@ -236,6 +276,14 @@ func runDirectoryScan(opts options, info os.FileInfo) {
 		if result.score >= 20 || len(result.ruleMatches) > 0 {
 			risky++
 		}
+		if opts.quarantine && isVirus(result) {
+			if quarantinedPath, err := quarantineFile(result, opts); err != nil {
+				fmt.Printf("  %s[HATA]%s Karantina basarisiz: %s: %s\n", Red, Reset, path, friendlyError(err))
+			} else {
+				quarantined++
+				result.path = quarantinedPath
+			}
+		}
 		if result.score > highest.score {
 			highest = result
 		}
@@ -250,6 +298,7 @@ func runDirectoryScan(opts options, info os.FileInfo) {
 	section("OZET")
 	field("Taranan dosya", fmt.Sprintf("%d", scanned))
 	field("Riskli dosya", fmt.Sprintf("%d", risky))
+	field("Karantina", fmt.Sprintf("%d", quarantined))
 	field("Atlanan", fmt.Sprintf("%d", skipped))
 	if highest.score >= 0 {
 		field("En yuksek risk", fmt.Sprintf("%d/100 - %s", highest.score, highest.path))
@@ -462,7 +511,7 @@ func printStrings(data []byte, opts options) int {
 	return len(suspicious)
 }
 
-func printScore(ent float64, matches []yara_rules.Match, suspiciousCategories int) {
+func printScore(ent float64, matches []yara_rules.Match, suspiciousCategories int) int {
 	section("RISK PUANI")
 	score := calculateThreatScore(ent, matches, suspiciousCategories)
 	color := Green
@@ -482,6 +531,146 @@ func printScore(ent float64, matches []yara_rules.Match, suspiciousCategories in
 	}
 
 	fmt.Printf("  %sPuan:%s %s%d/100 - %s%s\n", Bold, Reset, color, score, label, Reset)
+	return score
+}
+
+func printVirusAnalysis(result fileSummary) {
+	section("VIRUS ANALIZI")
+	if isVirus(result) {
+		fmt.Printf("  %sDurum:%s %sVIRUSLU / COK RISKLI%s\n", Bold, Reset, Red+Bold, Reset)
+	} else if result.score >= 20 || len(result.ruleMatches) > 0 {
+		fmt.Printf("  %sDurum:%s %sSUPHELI%s\n", Bold, Reset, Yellow, Reset)
+	} else {
+		fmt.Printf("  %sDurum:%s %sTemiz gorunuyor%s\n", Bold, Reset, Green, Reset)
+	}
+	field("Skor", fmt.Sprintf("%d/100", result.score))
+	field("Imza eslesmesi", fmt.Sprintf("%d", len(result.ruleMatches)))
+	field("Supheli kategori", fmt.Sprintf("%d", result.suspiciousCategories))
+	if hasCriticalRule(result.ruleMatches) {
+		fieldColor("Kritik imza", "var", Red+Bold)
+	}
+}
+
+func isVirus(result fileSummary) bool {
+	return result.score >= 60 || hasCriticalRule(result.ruleMatches)
+}
+
+func hasCriticalRule(matches []yara_rules.Match) bool {
+	for _, match := range matches {
+		if match.Severity == "critical" {
+			return true
+		}
+	}
+	return false
+}
+
+func quarantineFile(result fileSummary, opts options) (string, error) {
+	if err := os.MkdirAll(opts.quarantineDir, 0o700); err != nil {
+		return "", err
+	}
+
+	absSource, _ := filepath.Abs(result.path)
+	base := sanitizeName(filepath.Base(result.path))
+	if base == "" {
+		base = "file"
+	}
+	targetName := fmt.Sprintf("%s_%s_%s.quarantine", time.Now().Format("20060102-150405"), shortHash(result.sha256), base)
+	targetPath := filepath.Join(opts.quarantineDir, targetName)
+
+	if err := moveFile(result.path, targetPath); err != nil {
+		return "", err
+	}
+	if err := writeQuarantineMeta(targetPath+".meta.txt", absSource, result); err != nil {
+		return targetPath, err
+	}
+	return targetPath, nil
+}
+
+func moveFile(source, target string) error {
+	if err := os.Rename(source, target); err == nil {
+		return nil
+	}
+
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		_ = os.Remove(target)
+		return copyErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(target)
+		return closeErr
+	}
+	return os.Remove(source)
+}
+
+func writeQuarantineMeta(path, source string, result fileSummary) error {
+	var b strings.Builder
+	b.WriteString("file-cheeker quarantine metadata\n")
+	b.WriteString(fmt.Sprintf("time: %s\n", time.Now().Format(time.RFC3339)))
+	b.WriteString(fmt.Sprintf("source: %s\n", source))
+	b.WriteString(fmt.Sprintf("sha256: %s\n", result.sha256))
+	b.WriteString(fmt.Sprintf("score: %d/100\n", result.score))
+	b.WriteString(fmt.Sprintf("entropy: %.4f\n", result.entropy))
+	b.WriteString(fmt.Sprintf("file_type: %s\n", result.fileType))
+	b.WriteString("rules:\n")
+	for _, match := range result.ruleMatches {
+		b.WriteString(fmt.Sprintf("- [%s] %s\n", strings.ToUpper(match.Severity), match.RuleName))
+	}
+	return os.WriteFile(path, []byte(b.String()), 0o600)
+}
+
+func sanitizeName(name string) string {
+	replacer := strings.NewReplacer(
+		"/", "_",
+		"\\", "_",
+		":", "_",
+		"*", "_",
+		"?", "_",
+		"\"", "_",
+		"<", "_",
+		">", "_",
+		"|", "_",
+		" ", "_",
+	)
+	return replacer.Replace(name)
+}
+
+func shortHash(hash string) string {
+	if len(hash) >= 12 {
+		return hash[:12]
+	}
+	if hash == "" {
+		return "nohash"
+	}
+	return hash
+}
+
+func isInsideQuarantine(path, quarantineDir string) bool {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	absQuarantine, err := filepath.Abs(quarantineDir)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absQuarantine, absPath)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
 func calculateThreatScore(ent float64, matches []yara_rules.Match, suspiciousCategories int) int {
