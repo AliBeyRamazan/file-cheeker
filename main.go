@@ -9,6 +9,7 @@ import (
 	"file-analyzer/pkg/strings_extract"
 	"file-analyzer/pkg/yara_rules"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -32,6 +33,18 @@ type options struct {
 	showStrings bool
 	showAll     bool
 	showImports bool
+	recursive   bool
+}
+
+type fileSummary struct {
+	path                 string
+	fileType             string
+	sha256               string
+	entropy              float64
+	ruleMatches          []yara_rules.Match
+	suspiciousCategories int
+	score                int
+	err                  error
 }
 
 func main() {
@@ -61,7 +74,7 @@ func parseArgs(program string, args []string) (options, bool) {
 		}
 	}
 
-	opts := options{filePath: args[0]}
+	opts := options{filePath: args[0], recursive: true}
 	for _, arg := range args[1:] {
 		switch arg {
 		case "-a", "--all":
@@ -72,6 +85,8 @@ func parseArgs(program string, args []string) (options, bool) {
 			opts.showStrings = true
 		case "-i", "--imports":
 			opts.showImports = true
+		case "--no-recursive":
+			opts.recursive = false
 		case "-h", "--help":
 			usage(program)
 			os.Exit(0)
@@ -99,12 +114,15 @@ func usage(program string) {
 	fmt.Printf("  %s-a%s  tam analiz: stringler + importlar\n", Cyan, Reset)
 	fmt.Printf("  %s-s%s  bulunan stringleri goster\n", Cyan, Reset)
 	fmt.Printf("  %s-i%s  PE import fonksiyonlarini goster\n", Cyan, Reset)
+	fmt.Printf("  %s--no-recursive%s  klasor tararken alt klasorlere girme\n", Cyan, Reset)
 	fmt.Printf("  %s-h%s  yardim\n\n", Cyan, Reset)
 
 	fmt.Printf("%sLinux ornekleri:%s\n", Bold, Reset)
 	fmt.Printf("  %s ./suspicious\n", program)
 	fmt.Printf("  %s ./suspicious -a\n", program)
 	fmt.Printf("  %s /bin/ls -s\n", program)
+	fmt.Printf("  %s ~/Downloads -a\n", program)
+	fmt.Printf("  %s /media/$USER/USB_ADI -a\n", program)
 	fmt.Printf("  %s scan ./sample.elf -a\n", program)
 }
 
@@ -116,6 +134,10 @@ func runScan(opts options) {
 	if err != nil {
 		fmt.Printf("%s[HATA]%s Dosya bulunamadi: %s\n", Red, Reset, opts.filePath)
 		os.Exit(1)
+	}
+	if info.IsDir() {
+		runDirectoryScan(opts, info)
+		return
 	}
 
 	absPath, _ := filepath.Abs(opts.filePath)
@@ -176,6 +198,132 @@ func runScan(opts options) {
 	printScore(ent, matches, suspiciousCount)
 
 	fmt.Printf("\n%sAnaliz tamamlandi: %v%s\n\n", Dim, time.Since(startTime), Reset)
+}
+
+func runDirectoryScan(opts options, info os.FileInfo) {
+	absPath, _ := filepath.Abs(opts.filePath)
+	section("KLASOR / USB TARAMASI")
+	field("Hedef", absPath)
+	field("Mod", recursiveLabel(opts.recursive))
+	field("Boyut", analyzer.FormatSize(info.Size()))
+
+	startTime := time.Now()
+	var scanned, skipped, risky int
+	var highest fileSummary
+	highest.score = -1
+
+	err := filepath.WalkDir(opts.filePath, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			skipped++
+			fmt.Printf("  %s[ATLANDI]%s %s: %v\n", Yellow, Reset, path, walkErr)
+			return nil
+		}
+		if path != opts.filePath && entry.IsDir() && !opts.recursive {
+			return filepath.SkipDir
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			skipped++
+			fmt.Printf("  %s[ATLANDI]%s %s: %v\n", Yellow, Reset, path, err)
+			return nil
+		}
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+
+		result := analyzeFile(path)
+		scanned++
+		if result.err != nil {
+			skipped++
+			fmt.Printf("  %s[HATA]%s %s: %v\n", Red, Reset, path, result.err)
+			return nil
+		}
+		if result.score >= 20 || len(result.ruleMatches) > 0 {
+			risky++
+		}
+		if result.score > highest.score {
+			highest = result
+		}
+		printFileSummary(result)
+		return nil
+	})
+	if err != nil {
+		fmt.Printf("  %s[HATA]%s Klasor taranamadi: %v\n", Red, Reset, err)
+		os.Exit(1)
+	}
+
+	section("OZET")
+	field("Taranan dosya", fmt.Sprintf("%d", scanned))
+	field("Riskli dosya", fmt.Sprintf("%d", risky))
+	field("Atlanan", fmt.Sprintf("%d", skipped))
+	if highest.score >= 0 {
+		field("En yuksek risk", fmt.Sprintf("%d/100 - %s", highest.score, highest.path))
+	}
+	fmt.Printf("\n%sKlasor taramasi tamamlandi: %v%s\n\n", Dim, time.Since(startTime), Reset)
+}
+
+func analyzeFile(path string) fileSummary {
+	result := fileSummary{path: path}
+
+	_, fileTypeStr, err := analyzer.DetectFileType(path)
+	if err != nil {
+		result.fileType = "Belirlenemedi"
+	} else {
+		result.fileType = fileTypeStr
+	}
+
+	hashes, err := hasher.ComputeHashes(path)
+	if err != nil {
+		result.err = err
+		return result
+	}
+	result.sha256 = hashes.SHA256
+
+	ent, err := entropy.Calculate(path)
+	if err != nil {
+		result.err = err
+		return result
+	}
+	result.entropy = ent
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		result.err = err
+		return result
+	}
+	result.ruleMatches = yara_rules.Scan(data, yara_rules.DefaultRules())
+	strs := strings_extract.ExtractFromBytes(data, 6)
+	result.suspiciousCategories = len(strings_extract.FindSuspicious(strs))
+	result.score = calculateThreatScore(result.entropy, result.ruleMatches, result.suspiciousCategories)
+
+	return result
+}
+
+func printFileSummary(result fileSummary) {
+	color := Green
+	if result.score > 60 {
+		color = Red
+	} else if result.score > 20 {
+		color = Yellow
+	}
+
+	shortHash := result.sha256
+	if len(shortHash) > 12 {
+		shortHash = shortHash[:12]
+	}
+	fmt.Printf("  %s%3d/100%s  rules:%-2d strings:%-2d ent:%4.2f hash:%s  %s\n",
+		color, result.score, Reset,
+		len(result.ruleMatches), result.suspiciousCategories, result.entropy, shortHash, result.path)
+}
+
+func recursiveLabel(recursive bool) string {
+	if recursive {
+		return "recursive"
+	}
+	return "sadece bu klasor"
 }
 
 func printELF(filePath string) {
