@@ -18,6 +18,20 @@ type HashResult struct {
 	Size   int64
 }
 
+// ComputeHashesFromBytes computes MD5, SHA1, SHA256 from already-read data.
+func ComputeHashesFromBytes(data []byte) *HashResult {
+	md5Sum := md5.Sum(data)
+	sha1Sum := sha1.Sum(data)
+	sha256Sum := sha256.Sum256(data)
+
+	return &HashResult{
+		MD5:    hex.EncodeToString(md5Sum[:]),
+		SHA1:   hex.EncodeToString(sha1Sum[:]),
+		SHA256: hex.EncodeToString(sha256Sum[:]),
+		Size:   int64(len(data)),
+	}
+}
+
 // ComputeHashes reads a file and computes MD5, SHA1, SHA256 simultaneously
 func ComputeHashes(filepath string) (*HashResult, error) {
 	f, err := os.Open(filepath)

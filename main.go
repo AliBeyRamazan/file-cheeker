@@ -155,30 +155,28 @@ func runScan(opts options) {
 		field("Dosya turu", fileTypeStr)
 	}
 
-	section("HASH DEGERLERI")
-	hashes, err := hasher.ComputeHashes(opts.filePath)
+	data, err := os.ReadFile(opts.filePath)
 	if err != nil {
-		fmt.Printf("  %s[HATA]%s Hash hesaplanamadi: %s\n", Red, Reset, friendlyError(err))
-	} else {
-		fieldColor("MD5", hashes.MD5, Green)
-		fieldColor("SHA1", hashes.SHA1, Green)
-		fieldColor("SHA256", hashes.SHA256, Green)
+		fmt.Printf("  %s[HATA]%s Dosya okunamadi: %s\n", Red, Reset, friendlyError(err))
+		os.Exit(1)
 	}
 
+	section("HASH DEGERLERI")
+	hashes := hasher.ComputeHashesFromBytes(data)
+	fieldColor("MD5", hashes.MD5, Green)
+	fieldColor("SHA1", hashes.SHA1, Green)
+	fieldColor("SHA256", hashes.SHA256, Green)
+
 	section("ENTROPI ANALIZI")
-	ent, err := entropy.Calculate(opts.filePath)
-	if err != nil {
-		fmt.Printf("  %s[HATA]%s Entropi hesaplanamadi: %s\n", Red, Reset, friendlyError(err))
-	} else {
-		color := Green
-		if ent > 7.0 {
-			color = Red
-		} else if ent > 5.0 {
-			color = Yellow
-		}
-		fieldColor("Entropi", fmt.Sprintf("%.4f / 8.0", ent), color)
-		field("Yorum", entropy.Verdict(ent))
+	ent := entropy.CalculateFromBytes(data)
+	color := Green
+	if ent > 7.0 {
+		color = Red
+	} else if ent > 5.0 {
+		color = Yellow
 	}
+	fieldColor("Entropi", fmt.Sprintf("%.4f / 8.0", ent), color)
+	field("Yorum", entropy.Verdict(ent))
 
 	if fileType == analyzer.ELF {
 		printELF(opts.filePath)
@@ -187,14 +185,8 @@ func runScan(opts options) {
 		printPE(opts.filePath, opts)
 	}
 
-	data, err := os.ReadFile(opts.filePath)
-	if err != nil {
-		fmt.Printf("  %s[HATA]%s Dosya okunamadi: %s\n", Red, Reset, friendlyError(err))
-		os.Exit(1)
-	}
-
 	matches := printRules(data)
-	suspiciousCount := printStrings(opts.filePath, opts)
+	suspiciousCount := printStrings(data, opts)
 	printScore(ent, matches, suspiciousCount)
 
 	fmt.Printf("\n%sAnaliz tamamlandi: %v%s\n\n", Dim, time.Since(startTime), Reset)
@@ -275,25 +267,15 @@ func analyzeFile(path string) fileSummary {
 		result.fileType = fileTypeStr
 	}
 
-	hashes, err := hasher.ComputeHashes(path)
-	if err != nil {
-		result.err = err
-		return result
-	}
-	result.sha256 = hashes.SHA256
-
-	ent, err := entropy.Calculate(path)
-	if err != nil {
-		result.err = err
-		return result
-	}
-	result.entropy = ent
-
 	data, err := os.ReadFile(path)
 	if err != nil {
 		result.err = err
 		return result
 	}
+
+	hashes := hasher.ComputeHashesFromBytes(data)
+	result.sha256 = hashes.SHA256
+	result.entropy = entropy.CalculateFromBytes(data)
 	result.ruleMatches = yara_rules.Scan(data, yara_rules.DefaultRules())
 	strs := strings_extract.ExtractFromBytes(data, 6)
 	result.suspiciousCategories = len(strings_extract.FindSuspicious(strs))
@@ -429,13 +411,9 @@ func printRules(data []byte) []yara_rules.Match {
 	return matches
 }
 
-func printStrings(filePath string, opts options) int {
+func printStrings(data []byte, opts options) int {
 	section("SUPHELI STRINGLER")
-	strs, err := strings_extract.Extract(filePath, 6)
-	if err != nil {
-		fmt.Printf("  %s[HATA]%s Stringler cikarilamadi: %v\n", Red, Reset, err)
-		return 0
-	}
+	strs := strings_extract.ExtractFromBytes(data, 6)
 
 	field("Toplam string", fmt.Sprintf("%d (min 6 karakter)", len(strs)))
 	suspicious := strings_extract.FindSuspicious(strs)
